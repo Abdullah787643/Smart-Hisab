@@ -1,0 +1,6 @@
+{
+  "name": "Smart Hisab",
+  "description": "Professional mobile-first Personal Finance Manager to track income, expenses, debts, receivables, payables with dual English and Bangla support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

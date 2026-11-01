@@ -1,0 +1,87 @@
+{
+  "timestamp": 1793538585057,
+  "date": "2026-11-01T13:09:45.057Z",
+  "users": [
+    {
+      "id": "usr_1793535398859_827460c6",
+      "name": "Tanvir Ahmed",
+      "email": "tanvir@gmail.com",
+      "phone": "01711223344",
+      "password_hash": "$2b$10$lgAHDGUQsSkNB48hkrq76OQsmpEcqyobrgBzq.BdcX011dJ6Y4b.m",
+      "created_at": 1793535398859,
+      "updated_at": 1793535454209
+    },
+    {
+      "id": "usr_1793535431115_e93ce337",
+      "name": "Farhana Yasmin",
+      "email": "farhana@gmail.com",
+      "phone": "01899887766",
+      "password_hash": "$2b$10$J5MOg0W634qeFXdEA6GCk.4l1tGlAUjohX1EHSZJZ.1N2pHqKBMqq",
+      "created_at": 1793535431116,
+      "updated_at": 1793535431116
+    },
+    {
+      "id": "usr_1793535491511_84e92b52",
+      "name": "Google Tester",
+      "email": "google.tester@gmail.com",
+      "phone": "",
+      "password_hash": null,
+      "created_at": 1793535491511,
+      "updated_at": 1793535491511
+    },
+    {
+      "id": "usr_1793538175278_db0b8c77",
+      "name": "Tanvir Ahmed",
+      "email": "user175043@gmail.com",
+      "phone": "0171750431",
+      "password_hash": "$2b$10$s.1K/n0PZHcPbSNrZqT7/.OXdSZfg3PvlgLnNd25of.2B7slqtuSO",
+      "created_at": 1793538175278,
+      "updated_at": 1793538175278
+    },
+    {
+      "id": "usr_1793538175718_a9d5c450",
+      "name": "Rahim Chowdhury",
+      "email": "userb175043@gmail.com",
+      "phone": "0181750432",
+      "password_hash": "$2b$10$3YrIn.q.2770OtQnMzYk6.ZE7FZAY2p8UDtXcdyHwLhr2yo4YrSIK",
+      "created_at": 1793538175718,
+      "updated_at": 1793538175718
+    }
+  ],
+  "transactions": [
+    {
+      "id": "tx-1793535419663-i3mwx",
+      "user_id": "usr_1793535398859_827460c6",
+      "type": "income",
+      "amount": 85000,
+      "category": "salary",
+      "date": "2026-11-01",
+      "time": null,
+      "description": "November Salary",
+      "source": "Tech Company Ltd",
+      "where_spent": null,
+      "why_spent": null,
+      "payment_method": "bank",
+      "created_at": 1793535419663,
+      "updated_at": 1793535419663
+    },
+    {
+      "id": "tx_1793538175609",
+      "user_id": "usr_1793538175278_db0b8c77",
+      "type": "income",
+      "amount": 50000,
+      "category": "salary",
+      "date": "2026-11-01",
+      "time": null,
+      "description": "Monthly Tech Salary",
+      "source": null,
+      "where_spent": null,
+      "why_spent": null,
+      "payment_method": null,
+      "created_at": 1793538175614,
+      "updated_at": 1793538175614
+    }
+  ],
+  "debts": [],
+  "debt_payments": []
+}
