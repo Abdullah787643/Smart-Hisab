@@ -1,0 +1,46 @@
+# Netlify Configuration for Smart Hisab Web Application
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# ------------------------------------------------------------------------------
+# API PROXY CONFIGURATION (When backend is hosted on Render, Railway, or Cloud Run)
+# ------------------------------------------------------------------------------
+# If you deploy the Node.js Express backend to Render, Railway, or Google Cloud Run,
+# uncomment the redirect rule below and replace the URL with your backend service URL.
+# Netlify will automatically proxy all /api/* requests with ZERO CORS issues:
+#
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://your-smart-hisab-backend.onrender.com/api/:splat"
+#   status = 200
+#   force = true
+
+# ------------------------------------------------------------------------------
+# SINGLE PAGE APPLICATION (SPA) ROUTING
+# ------------------------------------------------------------------------------
+# Ensures that refreshing the browser on any internal route (e.g. /settings, /debts)
+# correctly renders the React SPA without returning a Netlify 404 error.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ------------------------------------------------------------------------------
+# SECURITY & CACHE HEADERS
+# ------------------------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

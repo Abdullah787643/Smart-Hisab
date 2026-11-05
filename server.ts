@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 initDb();
 
 const app = express();
-const port = parseInt(process.env.PORT || '3000', 10);
+const port = 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 app.use(cors());
@@ -38,8 +38,14 @@ app.use('/api/auth', authRouter);
 app.use('/api/data', dataRouter);
 
 async function startServer() {
-  // Initialize Cloud PostgreSQL if configured
-  await initCloudPostgres();
+  try {
+    // Initialize Cloud PostgreSQL if configured (non-blocking)
+    initCloudPostgres().catch((err) => {
+      console.warn('[Cloud Database] Deferred init error:', err.message);
+    });
+  } catch (e) {
+    console.warn('[Database] Startup warning:', e);
+  }
 
   if (!isProd) {
     // Development mode: Mount Vite dev server middleware
@@ -47,8 +53,8 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR !== 'true',
-        watch: process.env.DISABLE_HMR === 'true' ? null : {},
+        hmr: false,
+        watch: null,
       },
       appType: 'spa',
     });
