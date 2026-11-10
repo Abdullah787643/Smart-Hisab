@@ -1,0 +1,15 @@
+# Bun configuration for Smart Hisab
+#
+# Skip dependency lifecycle scripts during `bun install`.
+#
+# Why: better-sqlite3 v13 ships prebuilt native binaries (prebuilds/*.node) and
+# declares "gypfile": false, so it never needs compiling. Bun 1.3.x still runs an
+# implicit `node-gyp rebuild` for it because a binding.gyp file is present. Build
+# images without node-gyp (such as Netlify's) then fail with
+# "node-gyp: command not found".
+#
+# No other dependency needs its install scripts for this project. esbuild,
+# rolldown and Tailwind's oxide engine load their native binaries from
+# platform-specific optional packages.
+[install]
+ignoreScripts = true
