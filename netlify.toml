@@ -5,7 +5,8 @@
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # Node 22+ is required by better-sqlite3 v13 (engines: >=22) and supported by Vite 8.
+  NODE_VERSION = "22"
 
 # ------------------------------------------------------------------------------
 # API PROXY CONFIGURATION (When backend is hosted on Render, Railway, or Cloud Run)
