@@ -4,19 +4,13 @@
       <stop offset="0%" stop-color="#059669" />
       <stop offset="100%" stop-color="#047857" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.25"/>
-    </filter>
   </defs>
-  <!-- Background with rounded squircles -->
-  <rect width="512" height="512" rx="128" fill="url(#grad)" />
-  <!-- Wallet / Ledger Outline & Card Slot -->
-  <g filter="url(#shadow)" fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="512" height="512" rx="112" fill="url(#grad)" />
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
     <rect x="96" y="140" width="320" height="232" rx="36" />
     <path d="M96 220 H 416" />
     <path d="M290 286 H 350" />
     <circle cx="350" cy="286" r="14" fill="#ffffff" stroke="none" />
-    <!-- Bengali / Rupee / Currency Accent -->
     <path d="M190 260 V 312" stroke-width="24" />
     <path d="M168 280 H 212" stroke-width="24" />
   </g>

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initDb } from './server/db.js';
@@ -47,7 +48,28 @@ async function startServer() {
     console.warn('[Database] Startup warning:', e);
   }
 
-  // Serve public static assets (PWA manifest, icons, robots)
+  // Explicit Service Worker endpoint with required PWA headers
+  app.get('/sw.js', (req, res) => {
+    const swPath = fs.existsSync(path.resolve(__dirname, 'public/sw.js'))
+      ? path.resolve(__dirname, 'public/sw.js')
+      : path.resolve(__dirname, 'dist/sw.js');
+
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(swPath);
+  });
+
+  // Explicit Manifest endpoints
+  app.get(['/manifest.webmanifest', '/manifest.json'], (req, res) => {
+    const manifestPath = path.resolve(__dirname, 'public/manifest.webmanifest');
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=0');
+    res.sendFile(manifestPath);
+  });
+
+  // Serve public static assets (PWA icons, robots, etc.)
   const publicPath = path.resolve(__dirname, 'public');
   app.use(express.static(publicPath));
 

@@ -7,26 +7,20 @@ if (!fs.existsSync(publicDir)) {
   fs.mkdirSync(publicDir, { recursive: true });
 }
 
-// 1. High-quality SVG icon for Smart Hisab
+// 1. High-quality SVG icon for Smart Hisab (SVG remains for desktop web tabs)
 const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#059669" />
       <stop offset="100%" stop-color="#047857" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.25"/>
-    </filter>
   </defs>
-  <!-- Background with rounded squircles -->
-  <rect width="512" height="512" rx="128" fill="url(#grad)" />
-  <!-- Wallet / Ledger Outline & Card Slot -->
-  <g filter="url(#shadow)" fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="512" height="512" rx="112" fill="url(#grad)" />
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
     <rect x="96" y="140" width="320" height="232" rx="36" />
     <path d="M96 220 H 416" />
     <path d="M290 286 H 350" />
     <circle cx="350" cy="286" r="14" fill="#ffffff" stroke="none" />
-    <!-- Bengali / Rupee / Currency Accent -->
     <path d="M190 260 V 312" stroke-width="24" />
     <path d="M168 280 H 212" stroke-width="24" />
   </g>
@@ -35,57 +29,91 @@ const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" w
 fs.writeFileSync(path.join(publicDir, 'icon.svg'), svgIcon, 'utf-8');
 console.log('Saved public/icon.svg');
 
-// 2. Pure Node helper to generate valid uncompressed/DEFLATE PNG image
-function createPngBuffer(width, height, r, g, b) {
-  // Simple solid color PNG with emerald background and center white badge
+// 2. Pure Node helper to generate valid, standard-compliant RGBA PNG images
+// For maskable & any icons on Android: full-bleed background, crisp white emblem in safe zone (80% circle)
+function createPngIcon(width, height, isMaskable = false) {
   const rowSize = width * 4 + 1;
   const rawData = Buffer.alloc(rowSize * height);
+
+  const cx = width / 2;
+  const cy = height / 2;
+  
+  // Safe area sizing: emblem stays well inside 70% of canvas
+  const scale = width / 512;
 
   for (let y = 0; y < height; y++) {
     const rowOffset = y * rowSize;
     rawData[rowOffset] = 0; // Filter type 0 (None)
+
     for (let x = 0; x < width; x++) {
       const pixelOffset = rowOffset + 1 + x * 4;
-      
-      // Distance from center
-      const dx = x - width / 2;
-      const dy = y - height / 2;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const radius = width * 0.44;
+      const dx = x - cx;
+      const dy = y - cy;
 
-      // Squircle/rounded badge test
-      const isCorner = Math.abs(dx) > width * 0.38 && Math.abs(dy) > height * 0.38 && dist > width * 0.48;
-      
-      // Center icon symbol area (simplified wallet shape)
-      const isSymbol = Math.abs(dx) < width * 0.22 && Math.abs(dy) < height * 0.16 && (
-        Math.abs(dy) > height * 0.13 || Math.abs(dx) > width * 0.19 || Math.abs(dy - height * 0.02) < height * 0.02
-      );
+      // Base background: Primary Emerald (#059669 -> R:5, G:150, B:105)
+      // Slight gradient towards bottom right for polished depth
+      const gradFactor = 1 - (dy / height) * 0.15;
+      let r = Math.max(0, Math.min(255, Math.round(5 * gradFactor)));
+      let g = Math.max(0, Math.min(255, Math.round(150 * gradFactor)));
+      let b = Math.max(0, Math.min(255, Math.round(105 * gradFactor)));
+      let a = 255;
 
-      if (isCorner) {
-        // Transparent corner
-        rawData[pixelOffset] = 0;
-        rawData[pixelOffset + 1] = 0;
-        rawData[pixelOffset + 2] = 0;
-        rawData[pixelOffset + 3] = 0;
-      } else if (isSymbol) {
-        // White symbol
-        rawData[pixelOffset] = 255;
-        rawData[pixelOffset + 1] = 255;
-        rawData[pixelOffset + 2] = 255;
-        rawData[pixelOffset + 3] = 255;
-      } else {
-        // Emerald primary #059669
-        rawData[pixelOffset] = r;
-        rawData[pixelOffset + 1] = g;
-        rawData[pixelOffset + 2] = b;
-        rawData[pixelOffset + 3] = 255;
+      // Outer squircle corner check for non-maskable icons (maskable MUST be 100% full-bleed opaque!)
+      if (!isMaskable) {
+        const cornerDist = Math.pow(Math.abs(dx) / (width * 0.48), 5) + Math.pow(Math.abs(dy) / (height * 0.48), 5);
+        if (cornerDist > 1) {
+          a = 0;
+          r = 0;
+          g = 0;
+          b = 0;
+        }
       }
+
+      if (a > 0) {
+        // Draw emblem: Wallet body, card strip, latch, and currency symbol inside safe zone
+        const ndx = dx / scale;
+        const ndy = dy / scale;
+
+        // Wallet outer rect: x in [-160, 160], y in [-116, 116] with rounded corners
+        const inWalletBox = Math.abs(ndx) <= 160 && Math.abs(ndy) <= 116;
+        const isWalletCorner = (Math.abs(ndx) > 130 && Math.abs(ndy) > 86) &&
+          (Math.hypot(Math.abs(ndx) - 130, Math.abs(ndy) - 86) > 30);
+        const inWallet = inWalletBox && !isWalletCorner;
+
+        // Wallet border outline (width 26px)
+        const innerWalletBox = Math.abs(ndx) <= 134 && Math.abs(ndy) <= 90;
+        const isInnerCorner = (Math.abs(ndx) > 114 && Math.abs(ndy) > 70) &&
+          (Math.hypot(Math.abs(ndx) - 114, Math.abs(ndy) - 70) > 20);
+        const inInnerWallet = innerWalletBox && !isInnerCorner;
+
+        const isWalletStroke = inWallet && !inInnerWallet;
+
+        // Horizontal divider line at y = -36
+        const isDivider = Math.abs(ndy - (-36)) <= 13 && Math.abs(ndx) <= 140;
+
+        // Card latch at x in [30, 90], y in [16, 44]
+        const isLatch = Math.abs(ndx - 60) <= 30 && Math.abs(ndy - 30) <= 14;
+
+        // Currency sign (vertical bar at x=-60, horizontal bar at y=24)
+        const isCurrVertical = Math.abs(ndx - (-60)) <= 12 && ndy >= 4 && ndy <= 56;
+        const isCurrHorizontal = Math.abs(ndy - 24) <= 12 && ndx >= -82 && ndx <= -38;
+
+        if (isWalletStroke || isDivider || isLatch || isCurrVertical || isCurrHorizontal) {
+          r = 255;
+          g = 255;
+          b = 255;
+        }
+      }
+
+      rawData[pixelOffset] = r;
+      rawData[pixelOffset + 1] = g;
+      rawData[pixelOffset + 2] = b;
+      rawData[pixelOffset + 3] = a;
     }
   }
 
-  const deflated = zlib.deflateSync(rawData);
+  const deflated = zlib.deflateSync(rawData, { level: 9 });
 
-  // PNG Signature
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
   // IHDR chunk
@@ -99,29 +127,20 @@ function createPngBuffer(width, height, r, g, b) {
   ihdrData[12] = 0; // interlace method 0
   const ihdrChunk = makeChunk('IHDR', ihdrData);
 
+  // sRGB chunk (Rendering intent: Perceptual)
+  const srgbChunk = makeChunk('sRGB', Buffer.from([0]));
+
   // IDAT chunk
   const idatChunk = makeChunk('IDAT', deflated);
 
   // IEND chunk
   const iendChunk = makeChunk('IEND', Buffer.alloc(0));
 
-  return Buffer.concat([signature, ihdrChunk, idatChunk, iendChunk]);
+  return Buffer.concat([signature, ihdrChunk, srgbChunk, idatChunk, iendChunk]);
 }
 
 function crc32(buf) {
-  let table = [];
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) {
-      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    table[n] = c;
-  }
-  let crc = 0 ^ (-1);
-  for (let i = 0; i < buf.length; i++) {
-    crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xff];
-  }
-  return (crc ^ (-1)) >>> 0;
+  return zlib.crc32(buf);
 }
 
 function makeChunk(type, data) {
@@ -136,19 +155,23 @@ function makeChunk(type, data) {
   return chunk;
 }
 
-// Generate sizes: 192x192, 512x512, apple-touch-icon 180x180
-const pwa192 = createPngBuffer(192, 192, 5, 150, 105);
+// 1. Any icon 192x192
+const pwa192 = createPngIcon(192, 192, false);
 fs.writeFileSync(path.join(publicDir, 'pwa-192x192.png'), pwa192);
 
-const pwa512 = createPngBuffer(512, 512, 5, 150, 105);
+// 2. Any icon 512x512
+const pwa512 = createPngIcon(512, 512, false);
 fs.writeFileSync(path.join(publicDir, 'pwa-512x512.png'), pwa512);
 
-const pwaMaskable512 = createPngBuffer(512, 512, 5, 150, 105);
+// 3. Maskable icon 512x512 (MUST be 100% full bleed opaque!)
+const pwaMaskable512 = createPngIcon(512, 512, true);
 fs.writeFileSync(path.join(publicDir, 'pwa-maskable-512x512.png'), pwaMaskable512);
 
-const appleTouchIcon = createPngBuffer(180, 180, 5, 150, 105);
+// 4. Apple Touch Icon 180x180
+const appleTouchIcon = createPngIcon(180, 180, true);
 fs.writeFileSync(path.join(publicDir, 'apple-touch-icon.png'), appleTouchIcon);
 
-fs.writeFileSync(path.join(publicDir, 'favicon.ico'), createPngBuffer(32, 32, 5, 150, 105));
+// 5. Favicon 32x32
+fs.writeFileSync(path.join(publicDir, 'favicon.ico'), createPngIcon(32, 32, false));
 
-console.log('All PWA icon assets generated successfully in /public!');
+console.log('All compliant PWA icons generated successfully in /public!');
