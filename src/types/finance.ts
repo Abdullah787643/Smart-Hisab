@@ -118,3 +118,27 @@ export interface BackupData {
 export type ActiveTab = 'dashboard' | 'transactions' | 'debts' | 'analytics' | 'settings';
 
 export type QuickAddType = 'income' | 'expense' | 'debt' | 'choice';
+
+export type SyncActionType =
+  | 'CREATE_TX'
+  | 'UPDATE_TX'
+  | 'DELETE_TX'
+  | 'CREATE_DEBT'
+  | 'UPDATE_DEBT'
+  | 'DELETE_DEBT'
+  | 'RECORD_PAYMENT'
+  | 'DELETE_PAYMENT'
+  | 'UPDATE_SETTINGS';
+
+export interface SyncQueueItem {
+  id: string;
+  userId?: string;
+  action: SyncActionType;
+  entityId: string;
+  payload: any;
+  createdAt: number;
+  retryCount: number;
+  lastError?: string;
+}
+
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';

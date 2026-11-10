@@ -13,6 +13,7 @@ import {
   DebtPayment,
   BackupData,
   QuickAddType,
+  SyncStatus,
 } from '../types/finance';
 import { dbService } from '../services/db';
 import { getSampleData } from '../services/sampleData';
@@ -20,6 +21,7 @@ import { translations } from '../i18n/translations';
 import { formatCurrency as formatCurr, formatDate as formatD, formatTime as formatT } from '../i18n/formatters';
 import { useAuth } from './AuthContext';
 import { api } from '../services/api';
+import { syncEngine } from '../services/syncEngine';
 
 interface FinanceContextType {
   transactions: Transaction[];
@@ -30,6 +32,9 @@ interface FinanceContextType {
   toastMessage: string | null;
   t: typeof translations.en;
   isCloudSynced: boolean;
+  syncStatus: SyncStatus;
+  pendingCount: number;
+  triggerManualSync: () => Promise<boolean>;
 
   // Computed values
   totalIncome: number;
@@ -113,6 +118,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Sync Engine State
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(syncEngine.getStatus());
+  const [pendingCount, setPendingCount] = useState<number>(syncEngine.getPendingCount());
+
   // Modals state
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddInitialType, setQuickAddInitialType] = useState<QuickAddType>('choice');
@@ -142,47 +151,60 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, []);
 
-  // Synchronize financial data whenever currentUser changes
+  // Subscribe to Sync Engine updates
+  useEffect(() => {
+    const unsubStatus = syncEngine.subscribe((status, count) => {
+      setSyncStatus(status);
+      setPendingCount(count);
+    });
+
+    const unsubData = syncEngine.onDataUpdate((cloudData) => {
+      if (currentUser?.id) {
+        setTransactions(cloudData.transactions);
+        setDebts(cloudData.debts);
+        if (cloudData.settings) {
+          setSettings((prev) => ({
+            ...prev,
+            ...cloudData.settings,
+          }));
+        }
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubData();
+    };
+  }, [currentUser?.id]);
+
+  // Synchronize financial data whenever currentUser changes (Offline-First: instantly load IndexedDB)
   useEffect(() => {
     let isCancelled = false;
+    syncEngine.setActiveUser(currentUser?.id || null);
 
     if (currentUser?.id) {
       setIsLoading(true);
-      // Immediately reset state to guarantee complete data isolation between accounts
-      setTransactions([]);
-      setDebts([]);
 
-      api
-        .syncData()
-        .then((res) => {
-          if (!isCancelled && res.success && res.data) {
-            setTransactions(res.data.transactions || []);
-            setDebts(res.data.debts || []);
-            if (res.data.settings) {
-              setSettings((prev) => ({
-                ...prev,
-                ...res.data.settings,
-              }));
-            }
+      // 1. Instantly read user's offline IndexedDB data
+      Promise.all([dbService.getTransactions(currentUser.id), dbService.getDebts(currentUser.id)]).then(
+        ([cachedTxs, cachedDebts]) => {
+          if (isCancelled) return;
+          setTransactions(cachedTxs);
+          setDebts(cachedDebts);
+          setIsLoading(false);
+
+          // 2. If online, trigger cloud sync in background
+          if (typeof navigator === 'undefined' || navigator.onLine) {
+            syncEngine.triggerSync();
           }
-        })
-        .catch((err) => {
-          console.warn('API sync failed, falling back to local cache:', err);
-          if (!isCancelled) {
-            dbService.getTransactions().then((txs) => setTransactions(txs.filter((t) => t.userId === currentUser.id)));
-            dbService.getDebts().then((d) => setDebts(d.filter((item) => item.userId === currentUser.id)));
-          }
-        })
-        .finally(() => {
-          if (!isCancelled) setIsLoading(false);
-        });
+        }
+      );
     } else {
       // Local Guest mode (IndexedDB)
       setIsLoading(true);
       Promise.all([dbService.getTransactions(), dbService.getDebts()])
         .then(([loadedTxs, loadedDebts]) => {
           if (isCancelled) return;
-          // Filter to non-user or local records
           const localTxs = loadedTxs.filter((t) => !t.userId);
           const localDebts = loadedDebts.filter((d) => !d.userId);
 
@@ -286,7 +308,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Today's summary
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
-  const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
+  const currentMonthStr = todayStr.slice(0, 7);
 
   const todayIncome = useMemo(() => {
     return transactions
@@ -322,7 +344,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return Math.max(0, Math.min(100, Math.round((net / thisMonthIncome) * 100)));
   }, [thisMonthIncome, thisMonthExpense]);
 
-  // Transactions Management
+  // Manual trigger for user button
+  const triggerManualSync = useCallback(async () => {
+    return syncEngine.triggerSync();
+  }, []);
+
+  // 1. Transactions Management (Offline-First)
   const addTransaction = async (
     data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>,
     bypassDuplicateCheck = false
@@ -349,11 +376,35 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: Date.now(),
     };
 
-    if (currentUser?.id) {
-      await api.saveTransaction(newTx);
-    }
+    // 1. Local IndexedDB write & Instant Optimistic UI
     await dbService.saveTransaction(newTx);
     setTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== newTx.id)]);
+
+    // 2. Cloud sync or persistent queue
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.saveTransaction(newTx);
+        } catch (err) {
+          console.warn('Network save failed, enqueueing transaction:', err);
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'CREATE_TX',
+            entityId: newTx.id,
+            payload: newTx,
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'CREATE_TX',
+          entityId: newTx.id,
+          payload: newTx,
+        });
+      }
+    }
+
     showToast(t.toast.transactionAdded);
     return { success: true };
   };
@@ -364,25 +415,68 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       userId: currentUser?.id || transaction.userId,
       updatedAt: Date.now(),
     };
-    if (currentUser?.id) {
-      await api.updateTransaction(updated.id, updated);
-    }
+
     await dbService.saveTransaction(updated);
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.updateTransaction(updated.id, updated);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'UPDATE_TX',
+            entityId: updated.id,
+            payload: updated,
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'UPDATE_TX',
+          entityId: updated.id,
+          payload: updated,
+        });
+      }
+    }
+
     showToast(t.toast.transactionUpdated);
     setEditingTransaction(null);
   };
 
   const deleteTransaction = async (id: string) => {
-    if (currentUser?.id) {
-      await api.deleteTransaction(id);
-    }
     await dbService.deleteTransaction(id);
     setTransactions((prev) => prev.filter((t) => t.id !== id));
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.deleteTransaction(id);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'DELETE_TX',
+            entityId: id,
+            payload: { id },
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'DELETE_TX',
+          entityId: id,
+          payload: { id },
+        });
+      }
+    }
+
     showToast(t.toast.transactionDeleted);
   };
 
-  // Debt Management
+  // 2. Debt Management (Offline-First)
   const addDebt = async (
     data: Omit<Debt, 'id' | 'payments' | 'createdAt' | 'updatedAt' | 'status'>,
     adjustCashBalance = false
@@ -397,18 +491,37 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: Date.now(),
     };
 
-    if (currentUser?.id) {
-      await api.saveDebt(newDebt);
-    }
     await dbService.saveDebt(newDebt);
     setDebts((prev) => [newDebt, ...prev.filter((d) => d.id !== newDebt.id)]);
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.saveDebt(newDebt);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'CREATE_DEBT',
+            entityId: newDebt.id,
+            payload: newDebt,
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'CREATE_DEBT',
+          entityId: newDebt.id,
+          payload: newDebt,
+        });
+      }
+    }
 
     // If user selected to adjust cash balance immediately
     if (adjustCashBalance) {
       const currentTime = new Date();
       const timeStr = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}`;
       if (data.type === 'lent') {
-        // Cash outflow
         const outTx: Transaction = {
           id: 'tx-debt-out-' + Date.now(),
           type: 'expense',
@@ -423,13 +536,31 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
-        if (currentUser?.id) {
-          await api.saveTransaction(outTx);
-        }
         await dbService.saveTransaction(outTx);
         setTransactions((prev) => [outTx, ...prev]);
+
+        if (currentUser?.id) {
+          if (syncEngine.isOnline()) {
+            try {
+              await api.saveTransaction(outTx);
+            } catch {
+              await dbService.enqueueSync({
+                userId: currentUser.id,
+                action: 'CREATE_TX',
+                entityId: outTx.id,
+                payload: outTx,
+              });
+            }
+          } else {
+            await dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_TX',
+              entityId: outTx.id,
+              payload: outTx,
+            });
+          }
+        }
       } else {
-        // Cash inflow
         const inTx: Transaction = {
           id: 'tx-debt-in-' + Date.now(),
           type: 'income',
@@ -444,11 +575,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
-        if (currentUser?.id) {
-          await api.saveTransaction(inTx);
-        }
         await dbService.saveTransaction(inTx);
         setTransactions((prev) => [inTx, ...prev]);
+
+        if (currentUser?.id) {
+          if (syncEngine.isOnline()) {
+            try {
+              await api.saveTransaction(inTx);
+            } catch {
+              await dbService.enqueueSync({
+                userId: currentUser.id,
+                action: 'CREATE_TX',
+                entityId: inTx.id,
+                payload: inTx,
+              });
+            }
+          } else {
+            await dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_TX',
+              entityId: inTx.id,
+              payload: inTx,
+            });
+          }
+        }
       }
     }
 
@@ -466,21 +616,64 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       status: newStatus,
       updatedAt: Date.now(),
     };
-    if (currentUser?.id) {
-      await api.updateDebt(updated.id, updated);
-    }
+
     await dbService.saveDebt(updated);
     setDebts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.updateDebt(updated.id, updated);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'UPDATE_DEBT',
+            entityId: updated.id,
+            payload: updated,
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'UPDATE_DEBT',
+          entityId: updated.id,
+          payload: updated,
+        });
+      }
+    }
+
     showToast(t.toast.debtUpdated);
     setEditingDebt(null);
   };
 
   const deleteDebt = async (id: string) => {
-    if (currentUser?.id) {
-      await api.deleteDebt(id);
-    }
     await dbService.deleteDebt(id);
     setDebts((prev) => prev.filter((d) => d.id !== id));
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.deleteDebt(id);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'DELETE_DEBT',
+            entityId: id,
+            payload: { id },
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'DELETE_DEBT',
+          entityId: id,
+          payload: { id },
+        });
+      }
+    }
+
     showToast(t.toast.debtDeleted);
   };
 
@@ -514,13 +707,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: Date.now(),
     };
 
-    if (currentUser?.id) {
-      await api.recordDebtPayment(debtId, newPayment);
-    }
     await dbService.saveDebt(updatedDebt);
     setDebts((prev) => prev.map((d) => (d.id === updatedDebt.id ? updatedDebt : d)));
 
-    // Automatically record corresponding financial transaction so Total Balance updates!
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.recordDebtPayment(debtId, newPayment);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'RECORD_PAYMENT',
+            entityId: newPayment.id,
+            payload: { debtId, payment: newPayment },
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'RECORD_PAYMENT',
+          entityId: newPayment.id,
+          payload: { debtId, payment: newPayment },
+        });
+      }
+    }
+
+    // Automatically record corresponding financial transaction
     if (target.type === 'lent') {
       const collectionTx: Transaction = {
         id: 'tx-pay-' + Date.now(),
@@ -536,11 +749,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      if (currentUser?.id) {
-        await api.saveTransaction(collectionTx);
-      }
       await dbService.saveTransaction(collectionTx);
       setTransactions((prev) => [collectionTx, ...prev]);
+
+      if (currentUser?.id) {
+        if (syncEngine.isOnline()) {
+          try {
+            await api.saveTransaction(collectionTx);
+          } catch {
+            await dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_TX',
+              entityId: collectionTx.id,
+              payload: collectionTx,
+            });
+          }
+        } else {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'CREATE_TX',
+            entityId: collectionTx.id,
+            payload: collectionTx,
+          });
+        }
+      }
     } else {
       const repaymentTx: Transaction = {
         id: 'tx-pay-' + Date.now(),
@@ -556,11 +788,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      if (currentUser?.id) {
-        await api.saveTransaction(repaymentTx);
-      }
       await dbService.saveTransaction(repaymentTx);
       setTransactions((prev) => [repaymentTx, ...prev]);
+
+      if (currentUser?.id) {
+        if (syncEngine.isOnline()) {
+          try {
+            await api.saveTransaction(repaymentTx);
+          } catch {
+            await dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_TX',
+              entityId: repaymentTx.id,
+              payload: repaymentTx,
+            });
+          }
+        } else {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'CREATE_TX',
+            entityId: repaymentTx.id,
+            payload: repaymentTx,
+          });
+        }
+      }
     }
 
     if (isSettled) {
@@ -591,11 +842,31 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: Date.now(),
     };
 
-    if (currentUser?.id) {
-      await api.deleteDebtPayment(debtId, paymentId);
-    }
     await dbService.saveDebt(updatedDebt);
     setDebts((prev) => prev.map((d) => (d.id === updatedDebt.id ? updatedDebt : d)));
+
+    if (currentUser?.id) {
+      if (syncEngine.isOnline()) {
+        try {
+          await api.deleteDebtPayment(debtId, paymentId);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'DELETE_PAYMENT',
+            entityId: paymentId,
+            payload: { debtId, paymentId },
+          });
+          syncEngine.triggerSync();
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'DELETE_PAYMENT',
+          entityId: paymentId,
+          payload: { debtId, paymentId },
+        });
+      }
+    }
 
     if (paymentToDelete) {
       const matchingTx = transactions.find(
@@ -606,11 +877,30 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
             (target.type === 'borrowed' && t.category === 'debt_payment'))
       );
       if (matchingTx) {
-        if (currentUser?.id) {
-          await api.deleteTransaction(matchingTx.id);
-        }
         await dbService.deleteTransaction(matchingTx.id);
         setTransactions((prev) => prev.filter((t) => t.id !== matchingTx.id));
+
+        if (currentUser?.id) {
+          if (syncEngine.isOnline()) {
+            try {
+              await api.deleteTransaction(matchingTx.id);
+            } catch {
+              await dbService.enqueueSync({
+                userId: currentUser.id,
+                action: 'DELETE_TX',
+                entityId: matchingTx.id,
+                payload: { id: matchingTx.id },
+              });
+            }
+          } else {
+            await dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'DELETE_TX',
+              entityId: matchingTx.id,
+              payload: { id: matchingTx.id },
+            });
+          }
+        }
       }
     }
 
@@ -640,19 +930,34 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const merged: AppSettings = { ...settings, ...newSettings };
     await dbService.saveSettings(merged);
     setSettings(merged);
+
     if (currentUser?.id) {
-      try {
-        await api.saveUserSettings(newSettings);
-      } catch (err) {
-        console.warn('Failed to sync settings to cloud backend:', err);
+      if (syncEngine.isOnline()) {
+        try {
+          await api.saveUserSettings(newSettings);
+        } catch {
+          await dbService.enqueueSync({
+            userId: currentUser.id,
+            action: 'UPDATE_SETTINGS',
+            entityId: 'settings',
+            payload: newSettings,
+          });
+        }
+      } else {
+        await dbService.enqueueSync({
+          userId: currentUser.id,
+          action: 'UPDATE_SETTINGS',
+          entityId: 'settings',
+          payload: newSettings,
+        });
       }
     }
+
     showToast(translations[merged.language]?.toast?.settingsSaved || 'Settings saved');
   };
 
   const exportBackup = async () => {
     const backup = await dbService.exportBackup();
-    // Include in-memory transactions & debts
     backup.data.transactions = transactions;
     backup.data.debts = debts;
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
@@ -679,10 +984,32 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (currentUser?.id) {
         for (const tx of restoredTxs) {
-          await api.saveTransaction({ ...tx, userId: currentUser.id });
+          const item = { ...tx, userId: currentUser.id };
+          await dbService.saveTransaction(item);
+          if (syncEngine.isOnline()) {
+            api.saveTransaction(item).catch(() => {});
+          } else {
+            dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_TX',
+              entityId: item.id,
+              payload: item,
+            });
+          }
         }
         for (const d of restoredDebts) {
-          await api.saveDebt({ ...d, userId: currentUser.id });
+          const item = { ...d, userId: currentUser.id };
+          await dbService.saveDebt(item);
+          if (syncEngine.isOnline()) {
+            api.saveDebt(item).catch(() => {});
+          } else {
+            dbService.enqueueSync({
+              userId: currentUser.id,
+              action: 'CREATE_DEBT',
+              entityId: item.id,
+              payload: item,
+            });
+          }
         }
       }
 
@@ -753,6 +1080,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         toastMessage,
         t,
         isCloudSynced,
+        syncStatus,
+        pendingCount,
+        triggerManualSync,
         totalIncome,
         totalExpenses,
         totalBalance,

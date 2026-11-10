@@ -47,6 +47,10 @@ async function startServer() {
     console.warn('[Database] Startup warning:', e);
   }
 
+  // Serve public static assets (PWA manifest, icons, robots)
+  const publicPath = path.resolve(__dirname, 'public');
+  app.use(express.static(publicPath));
+
   if (!isProd) {
     // Development mode: Mount Vite dev server middleware
     const { createServer: createViteServer } = await import('vite');

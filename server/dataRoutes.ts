@@ -373,6 +373,12 @@ dataRouter.post('/debts/:id/payments', (req: AuthRequest, res: Response) => {
     db.prepare(`
       INSERT INTO debt_payments (id, debt_id, user_id, amount, date, time, note, payment_method, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        amount = excluded.amount,
+        date = excluded.date,
+        time = excluded.time,
+        note = excluded.note,
+        payment_method = excluded.payment_method
     `).run(
       payId,
       debtId,

@@ -374,6 +374,21 @@ export const translations = {
       devOtpBanner: 'OTP Code:',
       setupGuideTitle: 'Account & Setup Guide',
       setupGuideDesc: 'Information about server-side OTP, Google login and credentials',
+    },
+    sync: {
+      online: 'Online',
+      synced: 'Synced',
+      syncing: 'Syncing...',
+      offline: 'Offline Mode',
+      syncFailed: 'Sync Failed',
+      tapToRetry: 'Tap to retry',
+      pendingChanges: 'pending changes',
+      localDataSaved: 'Saved locally in IndexedDB',
+      autoSyncWhenOnline: 'Will sync automatically when back online',
+      syncNow: 'Sync Now',
+      installApp: 'Install App',
+      installAppDesc: 'Install Smart Hisab as a PWA on your device for fast offline access',
+      installed: 'App Installed',
     }
   },
 
@@ -745,6 +760,21 @@ export const translations = {
       devOtpBanner: 'ওটিপি কোড:',
       setupGuideTitle: 'অ্যাকাউন্ট ও সেটআপ গাইড',
       setupGuideDesc: 'সার্ভার ওটিপি, গুগল লগইন ও ক্রেডেনশিয়ালের তথ্য',
+    },
+    sync: {
+      online: 'অনলাইন',
+      synced: 'সিঙ্ক সম্পন্ন',
+      syncing: 'সিঙ্ক হচ্ছে...',
+      offline: 'অফলাইন মোড',
+      syncFailed: 'সিঙ্ক ব্যর্থ',
+      tapToRetry: 'পুনরায় চেষ্টা করুন',
+      pendingChanges: 'টি অপেক্ষমান পরিবর্তন',
+      localDataSaved: 'IndexedDB-তে স্থানীয়ভাবে সংরক্ষিত',
+      autoSyncWhenOnline: 'অনলাইনে ফিরলে স্বয়ংক্রিয়ভাবে সিঙ্ক হবে',
+      syncNow: 'এখনই সিঙ্ক করুন',
+      installApp: 'অ্যাপ ইন্সটল করুন',
+      installAppDesc: 'দ্রুত অফলাইন ব্যবহারের জন্য আপনার ডিভাইসে Smart Hisab PWA ইনস্টল করুন',
+      installed: 'অ্যাপ ইনস্টল করা হয়েছে',
     }
   }
 };

@@ -30,6 +30,8 @@ import { AppLanguage, AppCurrency, AppTheme } from '../../types/finance';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { ChangePasswordModal } from '../auth/ChangePasswordModal';
 import { AccountSetupGuideModal } from '../auth/AccountSetupGuideModal';
+import { PWAInstallButton } from '../common/PWAInstallButton';
+import { SyncStatusBadge } from '../common/SyncStatusBadge';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -43,6 +45,9 @@ export const SettingsView: React.FC = () => {
     transactions,
     debts,
     showToast,
+    syncStatus,
+    pendingCount,
+    triggerManualSync,
   } = useFinance();
 
   const {
@@ -234,6 +239,56 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* PWA Install Banner */}
+      <PWAInstallButton variant="card" />
+
+      {/* Real-time Central Cloud Sync & Offline Status */}
+      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {settings.language === 'bn' ? 'অফলাইন ও ক্লাউড সিঙ্ক' : 'Offline & Cloud Sync'}
+            </h3>
+          </div>
+          <SyncStatusBadge />
+        </div>
+
+        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+          {settings.language === 'bn'
+            ? 'Smart Hisab সম্পূর্ণ অফলাইন-প্রথম। ইন্টারনেট না থাকলেও আপনার সব আয়, ব্যয়, দেনা-পাওনা লোকাল IndexedDB-তে সংরক্ষিত থাকে এবং অনলাইন হলে স্বয়ংক্রিয়ভাবে ক্লাউডে সিঙ্ক হয়।'
+            : 'Smart Hisab is completely offline-first. All your income, expenses, debts, and transactions are saved locally in IndexedDB and automatically synchronize with central cloud storage when online.'}
+        </p>
+
+        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="text-xs text-slate-400">
+              {settings.language === 'bn' ? 'অপেক্ষমান সিঙ্ক কিউ' : 'Pending Sync Queue'}
+            </p>
+            <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 font-mono">
+              {pendingCount} {settings.language === 'bn' ? 'টি পরিবর্তন বাকি' : 'mutations pending'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await triggerManualSync();
+              if (ok) {
+                showToast(settings.language === 'bn' ? 'সিঙ্ক সফল হয়েছে' : 'Sync completed successfully');
+              } else {
+                showToast(settings.language === 'bn' ? 'অফলাইন বা সিঙ্ক ব্যর্থ' : 'Offline or sync failed');
+              }
+            }}
+            disabled={syncStatus === 'syncing'}
+            className="flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+            <span>{t.sync.syncNow}</span>
+          </button>
+        </div>
       </div>
 
       {/* 1. Language & Localization */}

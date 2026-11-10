@@ -49,33 +49,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSavedAccounts(api.getSavedAccounts());
   }, []);
 
-  // Initialize session on startup
+  // Initialize session on startup (with instant offline cache access)
   useEffect(() => {
     const initSession = async () => {
-      refreshSavedAccounts();
+      const accounts = api.getSavedAccounts();
+      setSavedAccounts(accounts);
       const token = api.getToken();
       if (!token) {
         setIsLoadingAuth(false);
         return;
       }
 
-      try {
-        const res = await api.getMe();
-        if (res.success && res.user) {
-          setCurrentUser(res.user);
-          api.saveAccount(res.user, token);
-          refreshSavedAccounts();
-        } else {
-          setCurrentUser(null);
-          api.setToken(null);
-        }
-      } catch (err) {
-        console.warn('Session verification failed:', err);
-        setCurrentUser(null);
-        api.setToken(null);
-      } finally {
-        setIsLoadingAuth(false);
+      // Immediately restore cached account so offline access works instantly
+      const cached = accounts.find((a) => a.token === token) || accounts[0];
+      if (cached) {
+        setCurrentUser({
+          id: cached.id,
+          name: cached.name,
+          email: cached.email,
+          phone: cached.phone,
+          avatarUrl: cached.avatarUrl,
+        });
       }
+
+      // Verify online session if network is available
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        try {
+          const res = await api.getMe();
+          if (res.success && res.user) {
+            setCurrentUser(res.user);
+            api.saveAccount(res.user, token);
+            refreshSavedAccounts();
+          } else if (!cached) {
+            setCurrentUser(null);
+            api.setToken(null);
+          }
+        } catch (err: any) {
+          console.warn('Session online check warning:', err?.message || err);
+          const isAuthError = err?.message && (err.message.includes('401') || err.message.includes('Unauthorized') || err.message.includes('Invalid token'));
+          if (isAuthError) {
+            // Token is revoked or invalid on backend
+            setCurrentUser(null);
+            api.setToken(null);
+            refreshSavedAccounts();
+          }
+          // If offline or network failure, retain the cached user session!
+        }
+      }
+
+      setIsLoadingAuth(false);
     };
 
     initSession();
@@ -165,25 +187,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 4. Instant Switch to Another Remembered Account
+  // 4. Instant Switch to Another Remembered Account (works offline and online)
   const switchToAccount = async (account: SavedAccount): Promise<void> => {
     api.setToken(account.token);
-    try {
-      const res = await api.getMe();
-      if (res.success && res.user) {
-        setCurrentUser(res.user);
-        api.saveAccount(res.user, account.token);
-        refreshSavedAccounts();
-        setIsAuthModalOpen(false);
-        return;
-      }
-    } catch (e) {
-      console.warn('Account session expired, prompting login:', e);
-    }
+    setCurrentUser({
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      phone: account.phone,
+      avatarUrl: account.avatarUrl,
+    });
+    refreshSavedAccounts();
+    setIsAuthModalOpen(false);
 
-    // If session is expired, prompt password login with their identifier pre-filled
-    setAuthMode('login');
-    setIsAuthModalOpen(true);
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      try {
+        const res = await api.getMe();
+        if (res.success && res.user) {
+          setCurrentUser(res.user);
+          api.saveAccount(res.user, account.token);
+          refreshSavedAccounts();
+          return;
+        }
+      } catch (e: any) {
+        console.warn('Account verification note:', e?.message || e);
+      }
+    }
   };
 
   // 5. Remove Account from Saved Device List

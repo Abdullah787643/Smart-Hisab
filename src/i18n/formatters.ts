@@ -59,6 +59,8 @@ export function toBengaliNumber(val: number | string): string {
   return str.replace(/[0-9]/g, (digit) => BENGALI_DIGITS[digit] || digit);
 }
 
+export const formatBengaliDigits = toBengaliNumber;
+
 export function formatCurrency(
   amount: number,
   currency: AppCurrency = 'BDT',
